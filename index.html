@@ -682,11 +682,19 @@
         hint = activeCategory ? 'tagged "' + tag + '" \u00b7 category: ' + activeCategory : 'tagged "' + tag + '"';
       } else {
         var p = '%' + kw + '%';
-        rows = queryRows(
-          'SELECT DISTINCT i.id, i.start_time, i.end_time, i.summary, i.context, i.detail, v.title, v.youtube_id, v.playlist_index FROM ideas i JOIN videos v ON v.id = i.video_id WHERE i.summary LIKE ? OR i.context LIKE ? OR i.detail LIKE ? ORDER BY v.playlist_index, i.start_time LIMIT 200',
-          [p, p, p]
-        );
-        hint = 'keyword "' + kw + '"';
+        if (activeCategory) {
+          rows = queryRows(
+            'SELECT DISTINCT i.id, i.start_time, i.end_time, i.summary, i.context, i.detail, v.title, v.youtube_id, v.playlist_index FROM ideas i JOIN videos v ON v.id = i.video_id JOIN idea_tags it ON it.idea_id = i.id JOIN tags t ON t.id = it.tag_id WHERE (i.summary LIKE ? OR i.context LIKE ? OR i.detail LIKE ?) AND t.category = ? ORDER BY v.playlist_index, i.start_time LIMIT 200',
+            [p, p, p, activeCategory]
+          );
+          hint = 'keyword "' + kw + '" \u00b7 category: ' + activeCategory;
+        } else {
+          rows = queryRows(
+            'SELECT DISTINCT i.id, i.start_time, i.end_time, i.summary, i.context, i.detail, v.title, v.youtube_id, v.playlist_index FROM ideas i JOIN videos v ON v.id = i.video_id WHERE i.summary LIKE ? OR i.context LIKE ? OR i.detail LIKE ? ORDER BY v.playlist_index, i.start_time LIMIT 200',
+            [p, p, p]
+          );
+          hint = 'keyword "' + kw + '"';
+        }
       }
     } catch(err) {
       showError(err.message);
