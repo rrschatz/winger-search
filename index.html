@@ -90,6 +90,16 @@
     /* BROWSE PANEL */
     .browse-panel { display: none; }
     .browse-panel.active { display: block; }
+
+    /* BROWSE VIDEOS */
+    .browse-video-list { display: flex; flex-direction: column; gap: 6px; }
+    .browse-video-item { background: var(--white); border: 1px solid var(--cream-dim); border-radius: 6px; padding: 12px 16px; cursor: pointer; display: flex; align-items: center; gap: 14px; transition: box-shadow 0.15s, transform 0.1s; }
+    .browse-video-item:hover { box-shadow: 0 2px 12px rgba(0,0,0,0.1); transform: translateY(-1px); }
+    .browse-video-badge { font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; padding: 3px 8px; border-radius: 3px; flex-shrink: 0; white-space: nowrap; }
+    .browse-video-badge.wim { background: rgba(201,168,76,0.12); color: var(--gold); border: 1px solid rgba(201,168,76,0.3); }
+    .browse-video-badge.livestreams { background: rgba(37,99,235,0.08); color: #2563eb; border: 1px solid rgba(37,99,235,0.25); }
+    .browse-video-title { font-family: 'IBM Plex Sans', sans-serif; font-size: 13px; font-weight: 500; color: var(--navy); flex: 1; min-width: 0; }
+    .browse-video-count { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #8a9aaa; flex-shrink: 0; }
     .browse-header { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--cream-dim); flex-wrap: wrap; }
     .browse-title { font-family: 'Playfair Display', serif; font-size: 22px; font-weight: 600; flex: 1; }
     .browse-filter-input { background: var(--white); border: 1px solid var(--cream-dim); border-radius: var(--radius); font-family: 'IBM Plex Sans', sans-serif; font-size: 13px; padding: 8px 12px; outline: none; width: 240px; color: var(--navy); transition: border-color 0.15s; }
@@ -197,7 +207,8 @@
           <input type="text" id="tagInput" placeholder="kephale, Peter Singer, Romans 8:28&hellip;" autocomplete="off" spellcheck="false">
         </div>
         <button class="btn-search" id="searchBtn">Search</button>
-        <button class="btn-browse" id="browseBtn">Browse</button>
+        <button class="btn-browse" id="browseBtn">Tags</button>
+        <button class="btn-browse" id="videosBtn">Videos</button>
       </div>
     </div>
   </div>
@@ -249,13 +260,16 @@
   var lastTag = '';
   var dbStats = { ideas: 0, videos: 0, tags: 0 };
   var browseMode = false;
+  var videoBrowseMode = false;
   var browseCat = 'all';
   var allBrowseTags = [];
+  var allVideos = [];
 
   var kwInput           = document.getElementById('kwInput');
   var tagInput          = document.getElementById('tagInput');
   var searchBtn         = document.getElementById('searchBtn');
   var browseBtn         = document.getElementById('browseBtn');
+  var videosBtn         = document.getElementById('videosBtn');
   var browsePanel       = document.getElementById('browsePanel');
   var appContent        = document.getElementById('appContent');
   var statusBar         = document.getElementById('statusBar');
@@ -282,6 +296,11 @@
 
     allBrowseTags = queryRows(
       'SELECT t.name, t.category, COUNT(it.idea_id) as cnt FROM tags t JOIN idea_tags it ON it.tag_id = t.id GROUP BY t.id ORDER BY cnt DESC, t.name ASC',
+      []
+    );
+
+    allVideos = queryRows(
+      'SELECT v.id, v.title, v.youtube_id, v.playlist, v.playlist_index, COUNT(i.id) as idea_count FROM videos v LEFT JOIN ideas i ON i.video_id = v.id GROUP BY v.id ORDER BY v.playlist, v.playlist_index',
       []
     );
 
@@ -349,16 +368,124 @@
 
   function exitBrowse() {
     browseMode = false;
+    videoBrowseMode = false;
     browseBtn.classList.remove('active');
+    videosBtn.classList.remove('active');
     browsePanel.classList.remove('active');
     appContent.style.display = '';
+    browseFilterInput.placeholder = 'Filter tags\u2026';
+    var titleEl = browsePanel.querySelector('.browse-title');
+    if (titleEl) titleEl.textContent = 'Index';
   }
 
   browseBtn.addEventListener('click', function() {
     if (browseMode) { exitBrowse(); showWelcome(); } else { enterBrowse(); }
   });
 
-  browseFilterInput.addEventListener('input', renderBrowseGrid);
+  browseFilterInput.addEventListener('input', function() {
+    if (videoBrowseMode) renderVideoList();
+    else renderBrowseGrid();
+  });
+
+  /* ---- SERIES LABEL ---- */
+
+  function seriesLabel(playlist, index) {
+    if (playlist === 'wim') return 'WiM ' + index;
+    return 'Liv ' + index;
+  }
+
+  /* ---- VIDEO BROWSE ---- */
+
+  function enterVideoBrowse() {
+    videoBrowseMode = true;
+    browseMode = false;
+    videosBtn.classList.add('active');
+    browseBtn.classList.remove('active');
+    browsePanel.classList.add('active');
+    statusBar.style.display = 'none';
+    appContent.style.display = 'none';
+    browseCatsEl.innerHTML = '';
+    browseFilterInput.placeholder = 'Filter videos\u2026';
+    var titleEl = browsePanel.querySelector('.browse-title');
+    if (titleEl) titleEl.textContent = 'Videos';
+    renderVideoList();
+  }
+
+  function renderVideoList() {
+    var filterText = browseFilterInput.value.trim().toLowerCase();
+    var vids = allVideos.filter(function(v) {
+      if (!filterText) return true;
+      return v.title.toLowerCase().indexOf(filterText) !== -1 || seriesLabel(v.playlist, v.playlist_index).toLowerCase().indexOf(filterText) !== -1;
+    });
+    if (!vids.length) { browseGridEl.innerHTML = '<div class="browse-empty">No videos found</div>'; return; }
+    var container = document.createElement('div');
+    container.className = 'browse-video-list';
+    vids.forEach(function(v) {
+      var item = document.createElement('div');
+      item.className = 'browse-video-item';
+      item.dataset.vid = v.id;
+      var badge = document.createElement('span');
+      badge.className = 'browse-video-badge ' + v.playlist;
+      badge.textContent = seriesLabel(v.playlist, v.playlist_index);
+      var title = document.createElement('span');
+      title.className = 'browse-video-title';
+      title.textContent = v.title;
+      var count = document.createElement('span');
+      count.className = 'browse-video-count';
+      count.textContent = v.idea_count + ' ideas';
+      item.appendChild(badge);
+      item.appendChild(title);
+      item.appendChild(count);
+      item.addEventListener('click', function() { showVideoIdeas(v.id); });
+      container.appendChild(item);
+    });
+    browseGridEl.innerHTML = '';
+    browseGridEl.appendChild(container);
+  }
+
+  function showVideoIdeas(videoId) {
+    exitBrowse();
+    var rows = queryRows(
+      'SELECT i.id, i.start_time, i.end_time, i.summary, i.context, i.detail, v.title, v.youtube_id, v.playlist_index, v.playlist FROM ideas i JOIN videos v ON v.id = i.video_id WHERE v.id = ? ORDER BY i.start_time',
+      [videoId]
+    );
+    if (!rows.length) {
+      appContent.innerHTML = '';
+      var emptyDiv = document.createElement('div');
+      emptyDiv.className = 'empty-state';
+      var emptyTitle = document.createElement('div');
+      emptyTitle.className = 'empty-state-title';
+      emptyTitle.textContent = 'No ideas found';
+      emptyDiv.appendChild(emptyTitle);
+      appContent.appendChild(emptyDiv);
+      return;
+    }
+
+    var ids = rows.map(function(r) { return r.id; });
+    var tagMap = fetchTagsForIdeas(ids);
+
+    statusBar.style.display = 'flex';
+    resultCount.innerHTML = '<span>' + rows.length + '</span> idea' + (rows.length === 1 ? '' : 's');
+    statusHint.textContent = seriesLabel(rows[0].playlist, rows[0].playlist_index) + ' \u00b7 ' + rows[0].title;
+
+    var html = '';
+    for (var i = 0; i < rows.length; i++) html += renderCard(rows[i], tagMap, i);
+    appContent.innerHTML = '<div class="results-list">' + html + '</div>';
+
+    appContent.querySelectorAll('.card-detail-toggle').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var arrow = btn.querySelector('.toggle-arrow');
+        var body  = btn.nextElementSibling;
+        var isOpen = body.classList.toggle('open');
+        arrow.classList.toggle('open', isOpen);
+        btn.querySelector('.toggle-label').textContent = isOpen ? 'Hide detail' : 'Show detail';
+      });
+    });
+  }
+
+  videosBtn.addEventListener('click', function() {
+    if (videoBrowseMode) { exitBrowse(); showWelcome(); } else { enterVideoBrowse(); }
+  });
 
   /* ---- VERSE RANGE MATCHING ---- */
 
@@ -424,7 +551,7 @@
 
     try {
       if (tag) {
-        var sql = 'SELECT DISTINCT i.id, i.start_time, i.end_time, i.summary, i.context, i.detail, v.title, v.youtube_id, v.playlist_index FROM ideas i JOIN idea_tags it ON it.idea_id = i.id JOIN tags t ON t.id = it.tag_id JOIN videos v ON v.id = i.video_id WHERE t.name LIKE ?';
+        var sql = 'SELECT DISTINCT i.id, i.start_time, i.end_time, i.summary, i.context, i.detail, v.title, v.youtube_id, v.playlist_index, v.playlist FROM ideas i JOIN idea_tags it ON it.idea_id = i.id JOIN tags t ON t.id = it.tag_id JOIN videos v ON v.id = i.video_id WHERE t.name LIKE ?';
         var params = ['%' + tag + '%'];
         if (activeCategory) { sql += ' AND t.category = ?'; params.push(activeCategory); }
         sql += ' ORDER BY v.playlist_index, i.start_time LIMIT 200';
@@ -438,7 +565,7 @@
           if (newIds.length) {
             var ph = newIds.map(function() { return '?'; }).join(',');
             var extra = queryRows(
-              'SELECT DISTINCT i.id, i.start_time, i.end_time, i.summary, i.context, i.detail, v.title, v.youtube_id, v.playlist_index FROM ideas i JOIN videos v ON v.id = i.video_id WHERE i.id IN (' + ph + ') ORDER BY v.playlist_index, i.start_time',
+              'SELECT DISTINCT i.id, i.start_time, i.end_time, i.summary, i.context, i.detail, v.title, v.youtube_id, v.playlist_index, v.playlist FROM ideas i JOIN videos v ON v.id = i.video_id WHERE i.id IN (' + ph + ') ORDER BY v.playlist_index, i.start_time',
               newIds
             );
             rows = rows.concat(extra).sort(function(a, b) {
@@ -453,13 +580,13 @@
         var p = '%' + kw + '%';
         if (activeCategory) {
           rows = queryRows(
-            'SELECT DISTINCT i.id, i.start_time, i.end_time, i.summary, i.context, i.detail, v.title, v.youtube_id, v.playlist_index FROM ideas i JOIN videos v ON v.id = i.video_id JOIN idea_tags it ON it.idea_id = i.id JOIN tags t ON t.id = it.tag_id WHERE (i.summary LIKE ? OR i.context LIKE ? OR i.detail LIKE ?) AND t.category = ? ORDER BY v.playlist_index, i.start_time LIMIT 200',
+            'SELECT DISTINCT i.id, i.start_time, i.end_time, i.summary, i.context, i.detail, v.title, v.youtube_id, v.playlist_index, v.playlist FROM ideas i JOIN videos v ON v.id = i.video_id JOIN idea_tags it ON it.idea_id = i.id JOIN tags t ON t.id = it.tag_id WHERE (i.summary LIKE ? OR i.context LIKE ? OR i.detail LIKE ?) AND t.category = ? ORDER BY v.playlist_index, i.start_time LIMIT 200',
             [p, p, p, activeCategory]
           );
           hint = activeCategory + ' \u00b7 keyword "' + kw + '"';
         } else {
           rows = queryRows(
-            'SELECT DISTINCT i.id, i.start_time, i.end_time, i.summary, i.context, i.detail, v.title, v.youtube_id, v.playlist_index FROM ideas i JOIN videos v ON v.id = i.video_id WHERE i.summary LIKE ? OR i.context LIKE ? OR i.detail LIKE ? ORDER BY v.playlist_index, i.start_time LIMIT 200',
+            'SELECT DISTINCT i.id, i.start_time, i.end_time, i.summary, i.context, i.detail, v.title, v.youtube_id, v.playlist_index, v.playlist FROM ideas i JOIN videos v ON v.id = i.video_id WHERE i.summary LIKE ? OR i.context LIKE ? OR i.detail LIKE ? ORDER BY v.playlist_index, i.start_time LIMIT 200',
             [p, p, p]
           );
           hint = 'keyword "' + kw + '"';
@@ -537,7 +664,7 @@
         '<div class="card-rail" style="background:' + railColor + '"></div>' +
         '<div class="card-body">' +
           '<div class="card-meta">' +
-            '<span class="card-video-num">Video ' + row.playlist_index + '</span>' +
+            '<span class="card-video-num">' + seriesLabel(row.playlist || 'livestreams', row.playlist_index) + '</span>' +
             '<span class="card-video-title">' + escHtml(row.title) + '</span>' +
             '<a class="card-timestamp" href="' + ytLink + '" target="_blank" rel="noopener">' + escHtml(tsDisplay) + '</a>' +
           '</div>' +
