@@ -569,7 +569,7 @@
     browseGridEl.appendChild(container);
   }
 
-  function showVideoIdeas(videoId, filterTagName) {
+  function showVideoIdeas(videoId, filterTagName, filterCat) {
     exitBrowse();
     var videoInfo = allVideos.filter(function(v) { return v.id === videoId; })[0];
     if (videoInfo) scopeVideoTo(videoId, videoInfo.title, videoInfo.playlist);
@@ -610,27 +610,81 @@
       [videoId]
     );
 
-    var tagBarHtml = '<div class="video-tags-header"><div class="video-tags-title">Tags in this video' + (filterTagName ? ' <button class="scope-clear" id="clearTagFilter">show all</button>' : '') + '</div><div class="browse-grid">';
-    videoTags.forEach(function(t) {
-      var isActive = filterTagName === t.name ? ' style="opacity:1;font-weight:600;box-shadow:0 0 0 2px currentColor"' : '';
-      tagBarHtml += '<button class="browse-tag-btn ' + escHtml(t.category) + '" data-vtag="' + escHtml(t.name) + '"' + isActive + '>' + escHtml(t.name) + '<span class="browse-tag-count">' + t.cnt + '</span></button>';
-    });
-    tagBarHtml += '</div></div>';
+    var videoTagCat = filterCat || 'all';
 
-    var html = tagBarHtml;
-    for (var i = 0; i < rows.length; i++) html += renderCard(rows[i], tagMap, i);
-    appContent.innerHTML = '<div class="results-list">' + html + '</div>';
+    var catCounts = { all: videoTags.length };
+    videoTags.forEach(function(t) { catCounts[t.category] = (catCounts[t.category] || 0) + 1; });
+
+    var tagBarEl = document.createElement('div');
+    tagBarEl.className = 'video-tags-header';
+
+    var titleRow = document.createElement('div');
+    titleRow.className = 'video-tags-title';
+    titleRow.textContent = 'Tags in this video';
+    if (filterTagName) {
+      var clearLink = document.createElement('button');
+      clearLink.className = 'scope-clear';
+      clearLink.id = 'clearTagFilter';
+      clearLink.textContent = 'show all';
+      titleRow.appendChild(document.createTextNode(' '));
+      titleRow.appendChild(clearLink);
+    }
+    tagBarEl.appendChild(titleRow);
+
+    var catsRow = document.createElement('div');
+    catsRow.className = 'browse-cats';
+    CAT_ORDER_BROWSE.forEach(function(cat) {
+      if (cat !== 'all' && !catCounts[cat]) return;
+      var btn = document.createElement('button');
+      btn.className = 'browse-cat-btn ' + cat + (videoTagCat === cat ? ' sel' : '');
+      btn.dataset.vcat = cat;
+      btn.textContent = (CAT_LABELS[cat] || cat) + ' (' + (catCounts[cat] || 0) + ')';
+      catsRow.appendChild(btn);
+    });
+    tagBarEl.appendChild(catsRow);
+
+    var gridEl = document.createElement('div');
+    gridEl.className = 'browse-grid';
+    var filteredTags = videoTags.filter(function(t) {
+      return videoTagCat === 'all' || t.category === videoTagCat;
+    });
+    filteredTags.forEach(function(t) {
+      var btn = document.createElement('button');
+      btn.className = 'browse-tag-btn ' + t.category;
+      btn.dataset.vtag = t.name;
+      if (filterTagName === t.name) btn.style.cssText = 'opacity:1;font-weight:600;box-shadow:0 0 0 2px currentColor';
+      btn.innerHTML = escHtml(t.name) + '<span class="browse-tag-count">' + t.cnt + '</span>';
+      gridEl.appendChild(btn);
+    });
+    tagBarEl.appendChild(gridEl);
+
+    var listEl = document.createElement('div');
+    listEl.className = 'results-list';
+    listEl.appendChild(tagBarEl);
+    for (var i = 0; i < rows.length; i++) {
+      var tmp = document.createElement('div');
+      tmp.innerHTML = renderCard(rows[i], tagMap, i);
+      listEl.appendChild(tmp.firstChild);
+    }
+    appContent.innerHTML = '';
+    appContent.appendChild(listEl);
+
+    catsRow.querySelectorAll('[data-vcat]').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        showVideoIdeas(videoId, filterTagName, btn.dataset.vcat === 'all' ? null : btn.dataset.vcat);
+      });
+    });
 
     appContent.querySelectorAll('[data-vtag]').forEach(function(btn) {
       btn.addEventListener('click', function() {
         var clickedTag = btn.dataset.vtag;
-        if (clickedTag === filterTagName) showVideoIdeas(videoId);
-        else showVideoIdeas(videoId, clickedTag);
+        if (clickedTag === filterTagName) showVideoIdeas(videoId, null, filterCat);
+        else showVideoIdeas(videoId, clickedTag, filterCat);
       });
     });
 
     var clearBtn = document.getElementById('clearTagFilter');
-    if (clearBtn) clearBtn.addEventListener('click', function() { showVideoIdeas(videoId); });
+    if (clearBtn) clearBtn.addEventListener('click', function() { showVideoIdeas(videoId, null, filterCat); });
 
     appContent.querySelectorAll('.card-detail-toggle').forEach(function(btn) {
       btn.addEventListener('click', function() {
