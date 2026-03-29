@@ -227,6 +227,7 @@
         <button class="btn-search" id="searchBtn">Search</button>
         <button class="btn-browse" id="browseBtn">Tags</button>
         <button class="btn-browse" id="videosBtn">Videos</button>
+        <button class="btn-browse" id="resetBtn" style="color:#e05252;border-color:rgba(224,82,82,0.3)">Reset</button>
       </div>
     </div>
   </div>
@@ -310,6 +311,7 @@
   var browseFilterInput = document.getElementById('browseFilterInput');
   var scopeVideoName  = document.getElementById('scopeVideoName');
   var scopeClear      = document.getElementById('scopeClear');
+  var resetBtn        = document.getElementById('resetBtn');
 
   try {
     var SQL = await initSqlJs({
@@ -377,6 +379,22 @@
     if (browseMode) { refreshBrowseTags(); buildBrowseCats(); renderBrowseGrid(); }
     else if (lastKeyword || lastTag) { runSearch(); }
     else { showWelcome(); }
+  });
+
+  resetBtn.addEventListener('click', function() {
+    kwInput.value = '';
+    tagInput.value = '';
+    lastKeyword = '';
+    lastTag = '';
+    activeCategory = '';
+    activeSeries = '';
+    activeVideoId = null;
+    activeVideoTitle = '';
+    browseCat = 'all';
+    document.querySelectorAll('.filter-btn').forEach(function(b) { b.classList.toggle('active', b.dataset.cat === ''); });
+    updateScopeUI();
+    exitBrowse();
+    showWelcome();
   });
 
   function scopeVideoTo(videoId, videoTitle, playlist) {
