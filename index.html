@@ -169,6 +169,24 @@
     .card-detail-body.open { max-height: 400px; margin-top: 10px; }
     .card-detail-text { font-family: 'IBM Plex Sans', sans-serif; font-size: 13px; line-height: 1.65; color: #3a4a5a; border-left: 2px solid var(--cream-dim); padding-left: 14px; }
 
+    /* SCOPE BAR */
+    .scope-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; padding: 10px 14px; background: var(--white); border: 1px solid var(--cream-dim); border-radius: 6px; flex-wrap: wrap; }
+    .scope-label { font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: #8a9aaa; flex-shrink: 0; }
+    .scope-pill { font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.06em; padding: 4px 12px; border-radius: 20px; border: 1px solid var(--cream-dim); cursor: pointer; background: transparent; color: #6b7f96; transition: all 0.15s; }
+    .scope-pill:hover { border-color: #8a9aaa; color: var(--navy); }
+    .scope-pill.active { background: var(--navy); color: var(--cream); border-color: var(--navy); }
+    .scope-pill.wim.active { background: var(--gold); color: var(--navy); border-color: var(--gold); }
+    .scope-pill.liv.active { background: #2563eb; color: white; border-color: #2563eb; }
+    .scope-pill.vid.active { background: #16a34a; color: white; border-color: #16a34a; }
+    .scope-clear { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #8a9aaa; cursor: pointer; background: none; border: none; text-decoration: underline; margin-left: 4px; }
+    .scope-clear:hover { color: var(--navy); }
+    .scope-video-name { font-family: 'IBM Plex Sans', sans-serif; font-size: 12px; color: var(--navy); font-weight: 500; margin-left: 4px; }
+
+    /* VIDEO TAGS HEADER */
+    .video-tags-header { margin-bottom: 16px; padding: 14px 16px; background: var(--white); border: 1px solid var(--cream-dim); border-radius: 6px; }
+    .video-tags-header .browse-grid { margin-top: 10px; }
+    .video-tags-title { font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #8a9aaa; margin-bottom: 8px; }
+
     .filter-bar-inner::-webkit-scrollbar { height: 3px; }
     .filter-bar-inner::-webkit-scrollbar-track { background: transparent; }
     .filter-bar-inner::-webkit-scrollbar-thumb { background: var(--navy-light); border-radius: 2px; }
@@ -229,6 +247,15 @@
 </div>
 
 <main>
+  <div id="scopeBar" class="scope-bar">
+    <span class="scope-label">Scope:</span>
+    <button class="scope-pill active" data-scope="">All</button>
+    <button class="scope-pill wim" data-scope="wim">WiM</button>
+    <button class="scope-pill liv" data-scope="livestreams">Livestreams</button>
+    <span id="scopeVideoName" class="scope-video-name" style="display:none"></span>
+    <button id="scopeClear" class="scope-clear" style="display:none">clear video</button>
+  </div>
+
   <div id="statusBar" class="status-bar" style="display:none">
     <div class="result-count" id="resultCount"></div>
     <div class="status-hint" id="statusHint"></div>
@@ -264,6 +291,9 @@
   var browseCat = 'all';
   var allBrowseTags = [];
   var allVideos = [];
+  var activeSeries = '';
+  var activeVideoId = null;
+  var activeVideoTitle = '';
 
   var kwInput           = document.getElementById('kwInput');
   var tagInput          = document.getElementById('tagInput');
@@ -278,6 +308,8 @@
   var browseCatsEl      = document.getElementById('browseCats');
   var browseGridEl      = document.getElementById('browseGrid');
   var browseFilterInput = document.getElementById('browseFilterInput');
+  var scopeVideoName  = document.getElementById('scopeVideoName');
+  var scopeClear      = document.getElementById('scopeClear');
 
   try {
     var SQL = await initSqlJs({
@@ -308,6 +340,69 @@
   } catch(err) {
     showError(err.message);
     return;
+  }
+
+  /* ---- SCOPE ---- */
+
+  function updateScopeUI() {
+    document.querySelectorAll('.scope-pill').forEach(function(p) {
+      p.classList.toggle('active', p.dataset.scope === activeSeries);
+    });
+    if (activeVideoId) {
+      scopeVideoName.textContent = activeVideoTitle;
+      scopeVideoName.style.display = '';
+      scopeClear.style.display = '';
+    } else {
+      scopeVideoName.style.display = 'none';
+      scopeClear.style.display = 'none';
+    }
+  }
+
+  document.querySelectorAll('.scope-pill').forEach(function(pill) {
+    pill.addEventListener('click', function() {
+      activeSeries = pill.dataset.scope;
+      activeVideoId = null;
+      activeVideoTitle = '';
+      updateScopeUI();
+      if (browseMode) { refreshBrowseTags(); buildBrowseCats(); renderBrowseGrid(); }
+      else if (videoBrowseMode) { renderVideoList(); }
+      else if (lastKeyword || lastTag) { runSearch(); }
+    });
+  });
+
+  scopeClear.addEventListener('click', function() {
+    activeVideoId = null;
+    activeVideoTitle = '';
+    updateScopeUI();
+    if (browseMode) { refreshBrowseTags(); buildBrowseCats(); renderBrowseGrid(); }
+    else if (lastKeyword || lastTag) { runSearch(); }
+    else { showWelcome(); }
+  });
+
+  function scopeVideoTo(videoId, videoTitle, playlist) {
+    activeVideoId = videoId;
+    activeVideoTitle = videoTitle;
+    activeSeries = playlist;
+    updateScopeUI();
+  }
+
+  function refreshBrowseTags() {
+    if (activeVideoId) {
+      allBrowseTags = queryRows(
+        'SELECT t.name, t.category, COUNT(DISTINCT it.idea_id) as cnt FROM tags t JOIN idea_tags it ON it.tag_id = t.id JOIN ideas i ON i.id = it.idea_id WHERE i.video_id = ? GROUP BY t.id ORDER BY cnt DESC, t.name ASC',
+        [activeVideoId]
+      );
+    } else if (activeSeries) {
+      allBrowseTags = queryRows(
+        'SELECT t.name, t.category, COUNT(DISTINCT it.idea_id) as cnt FROM tags t JOIN idea_tags it ON it.tag_id = t.id JOIN ideas i ON i.id = it.idea_id JOIN videos v ON v.id = i.video_id WHERE v.playlist = ? GROUP BY t.id ORDER BY cnt DESC, t.name ASC',
+        [activeSeries]
+      );
+    } else {
+      allBrowseTags = queryRows(
+        'SELECT t.name, t.category, COUNT(it.idea_id) as cnt FROM tags t JOIN idea_tags it ON it.tag_id = t.id GROUP BY t.id ORDER BY cnt DESC, t.name ASC',
+        []
+      );
+    }
   }
 
   /* ---- BROWSE ---- */
@@ -358,10 +453,22 @@
 
   function enterBrowse() {
     browseMode = true;
+    videoBrowseMode = false;
     browseBtn.classList.add('active');
+    videosBtn.classList.remove('active');
     browsePanel.classList.add('active');
     statusBar.style.display = 'none';
     appContent.style.display = 'none';
+    browseFilterInput.placeholder = 'Filter tags\u2026';
+    var titleEl = browsePanel.querySelector('.browse-title');
+    if (titleEl) {
+      var label = 'Tags';
+      if (activeVideoId) label = 'Tags \u00b7 ' + activeVideoTitle;
+      else if (activeSeries === 'wim') label = 'Tags \u00b7 Women in Ministry';
+      else if (activeSeries === 'livestreams') label = 'Tags \u00b7 Livestreams';
+      titleEl.textContent = label;
+    }
+    refreshBrowseTags();
     buildBrowseCats();
     renderBrowseGrid();
   }
@@ -414,6 +521,7 @@
   function renderVideoList() {
     var filterText = browseFilterInput.value.trim().toLowerCase();
     var vids = allVideos.filter(function(v) {
+      if (activeSeries && v.playlist !== activeSeries) return false;
       if (!filterText) return true;
       return v.title.toLowerCase().indexOf(filterText) !== -1 || seriesLabel(v.playlist, v.playlist_index).toLowerCase().indexOf(filterText) !== -1;
     });
@@ -443,12 +551,21 @@
     browseGridEl.appendChild(container);
   }
 
-  function showVideoIdeas(videoId) {
+  function showVideoIdeas(videoId, filterTagName) {
     exitBrowse();
-    var rows = queryRows(
-      'SELECT i.id, i.start_time, i.end_time, i.summary, i.context, i.detail, v.title, v.youtube_id, v.playlist_index, v.playlist FROM ideas i JOIN videos v ON v.id = i.video_id WHERE v.id = ? ORDER BY i.start_time',
-      [videoId]
-    );
+    var videoInfo = allVideos.filter(function(v) { return v.id === videoId; })[0];
+    if (videoInfo) scopeVideoTo(videoId, videoInfo.title, videoInfo.playlist);
+
+    var sql, params;
+    if (filterTagName) {
+      sql = 'SELECT DISTINCT i.id, i.start_time, i.end_time, i.summary, i.context, i.detail, v.title, v.youtube_id, v.playlist_index, v.playlist FROM ideas i JOIN videos v ON v.id = i.video_id JOIN idea_tags it ON it.idea_id = i.id JOIN tags t ON t.id = it.tag_id WHERE v.id = ? AND t.name = ? ORDER BY i.start_time';
+      params = [videoId, filterTagName];
+    } else {
+      sql = 'SELECT i.id, i.start_time, i.end_time, i.summary, i.context, i.detail, v.title, v.youtube_id, v.playlist_index, v.playlist FROM ideas i JOIN videos v ON v.id = i.video_id WHERE v.id = ? ORDER BY i.start_time';
+      params = [videoId];
+    }
+    var rows = queryRows(sql, params);
+
     if (!rows.length) {
       appContent.innerHTML = '';
       var emptyDiv = document.createElement('div');
@@ -466,11 +583,36 @@
 
     statusBar.style.display = 'flex';
     resultCount.innerHTML = '<span>' + rows.length + '</span> idea' + (rows.length === 1 ? '' : 's');
-    statusHint.textContent = seriesLabel(rows[0].playlist, rows[0].playlist_index) + ' \u00b7 ' + rows[0].title;
+    var hintText = seriesLabel(rows[0].playlist, rows[0].playlist_index) + ' \u00b7 ' + rows[0].title;
+    if (filterTagName) hintText += ' \u00b7 tag: ' + filterTagName;
+    statusHint.textContent = hintText;
 
-    var html = '';
+    var videoTags = queryRows(
+      'SELECT t.name, t.category, COUNT(DISTINCT it.idea_id) as cnt FROM tags t JOIN idea_tags it ON it.tag_id = t.id JOIN ideas i ON i.id = it.idea_id WHERE i.video_id = ? GROUP BY t.id ORDER BY cnt DESC, t.name ASC',
+      [videoId]
+    );
+
+    var tagBarHtml = '<div class="video-tags-header"><div class="video-tags-title">Tags in this video' + (filterTagName ? ' <button class="scope-clear" id="clearTagFilter">show all</button>' : '') + '</div><div class="browse-grid">';
+    videoTags.forEach(function(t) {
+      var isActive = filterTagName === t.name ? ' style="opacity:1;font-weight:600;box-shadow:0 0 0 2px currentColor"' : '';
+      tagBarHtml += '<button class="browse-tag-btn ' + escHtml(t.category) + '" data-vtag="' + escHtml(t.name) + '"' + isActive + '>' + escHtml(t.name) + '<span class="browse-tag-count">' + t.cnt + '</span></button>';
+    });
+    tagBarHtml += '</div></div>';
+
+    var html = tagBarHtml;
     for (var i = 0; i < rows.length; i++) html += renderCard(rows[i], tagMap, i);
     appContent.innerHTML = '<div class="results-list">' + html + '</div>';
+
+    appContent.querySelectorAll('[data-vtag]').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var clickedTag = btn.dataset.vtag;
+        if (clickedTag === filterTagName) showVideoIdeas(videoId);
+        else showVideoIdeas(videoId, clickedTag);
+      });
+    });
+
+    var clearBtn = document.getElementById('clearTagFilter');
+    if (clearBtn) clearBtn.addEventListener('click', function() { showVideoIdeas(videoId); });
 
     appContent.querySelectorAll('.card-detail-toggle').forEach(function(btn) {
       btn.addEventListener('click', function() {
@@ -538,6 +680,14 @@
     appContent.innerHTML = '<div class="error-state">Error: ' + escHtml(msg) + '</div>';
   }
 
+  function scopeWhere() {
+    var clauses = [];
+    var params = [];
+    if (activeVideoId) { clauses.push('v.id = ?'); params.push(activeVideoId); }
+    else if (activeSeries) { clauses.push('v.playlist = ?'); params.push(activeSeries); }
+    return { clauses: clauses, params: params };
+  }
+
   function runSearch() {
     exitBrowse();
     var kw  = kwInput.value.trim();
@@ -546,6 +696,7 @@
     lastTag = tag;
     if (!kw && !tag) { showWelcome(); return; }
 
+    var scope = scopeWhere();
     var rows = [];
     var hint = '';
 
@@ -554,6 +705,8 @@
         var sql = 'SELECT DISTINCT i.id, i.start_time, i.end_time, i.summary, i.context, i.detail, v.title, v.youtube_id, v.playlist_index, v.playlist FROM ideas i JOIN idea_tags it ON it.idea_id = i.id JOIN tags t ON t.id = it.tag_id JOIN videos v ON v.id = i.video_id WHERE t.name LIKE ?';
         var params = ['%' + tag + '%'];
         if (activeCategory) { sql += ' AND t.category = ?'; params.push(activeCategory); }
+        scope.clauses.forEach(function(c) { sql += ' AND ' + c; });
+        params = params.concat(scope.params);
         sql += ' ORDER BY v.playlist_index, i.start_time LIMIT 200';
         rows = queryRows(sql, params);
 
@@ -564,10 +717,12 @@
           var newIds = rangeIds.filter(function(id) { return !existing[id]; });
           if (newIds.length) {
             var ph = newIds.map(function() { return '?'; }).join(',');
-            var extra = queryRows(
-              'SELECT DISTINCT i.id, i.start_time, i.end_time, i.summary, i.context, i.detail, v.title, v.youtube_id, v.playlist_index, v.playlist FROM ideas i JOIN videos v ON v.id = i.video_id WHERE i.id IN (' + ph + ') ORDER BY v.playlist_index, i.start_time',
-              newIds
-            );
+            var extraSql = 'SELECT DISTINCT i.id, i.start_time, i.end_time, i.summary, i.context, i.detail, v.title, v.youtube_id, v.playlist_index, v.playlist FROM ideas i JOIN videos v ON v.id = i.video_id WHERE i.id IN (' + ph + ')';
+            var extraParams = newIds.slice();
+            scope.clauses.forEach(function(c) { extraSql += ' AND ' + c; });
+            extraParams = extraParams.concat(scope.params);
+            extraSql += ' ORDER BY v.playlist_index, i.start_time';
+            var extra = queryRows(extraSql, extraParams);
             rows = rows.concat(extra).sort(function(a, b) {
               if (a.playlist_index !== b.playlist_index) return a.playlist_index - b.playlist_index;
               return (a.start_time || '').localeCompare(b.start_time || '');
@@ -579,24 +734,32 @@
       } else {
         var p = '%' + kw + '%';
         if (activeCategory) {
-          rows = queryRows(
-            'SELECT DISTINCT i.id, i.start_time, i.end_time, i.summary, i.context, i.detail, v.title, v.youtube_id, v.playlist_index, v.playlist FROM ideas i JOIN videos v ON v.id = i.video_id JOIN idea_tags it ON it.idea_id = i.id JOIN tags t ON t.id = it.tag_id WHERE (i.summary LIKE ? OR i.context LIKE ? OR i.detail LIKE ?) AND t.category = ? ORDER BY v.playlist_index, i.start_time LIMIT 200',
-            [p, p, p, activeCategory]
-          );
+          var sql2 = 'SELECT DISTINCT i.id, i.start_time, i.end_time, i.summary, i.context, i.detail, v.title, v.youtube_id, v.playlist_index, v.playlist FROM ideas i JOIN videos v ON v.id = i.video_id JOIN idea_tags it ON it.idea_id = i.id JOIN tags t ON t.id = it.tag_id WHERE (i.summary LIKE ? OR i.context LIKE ? OR i.detail LIKE ?) AND t.category = ?';
+          var params2 = [p, p, p, activeCategory];
+          scope.clauses.forEach(function(c) { sql2 += ' AND ' + c; });
+          params2 = params2.concat(scope.params);
+          sql2 += ' ORDER BY v.playlist_index, i.start_time LIMIT 200';
+          rows = queryRows(sql2, params2);
           hint = activeCategory + ' \u00b7 keyword "' + kw + '"';
         } else {
-          rows = queryRows(
-            'SELECT DISTINCT i.id, i.start_time, i.end_time, i.summary, i.context, i.detail, v.title, v.youtube_id, v.playlist_index, v.playlist FROM ideas i JOIN videos v ON v.id = i.video_id WHERE i.summary LIKE ? OR i.context LIKE ? OR i.detail LIKE ? ORDER BY v.playlist_index, i.start_time LIMIT 200',
-            [p, p, p]
-          );
+          var sql3 = 'SELECT DISTINCT i.id, i.start_time, i.end_time, i.summary, i.context, i.detail, v.title, v.youtube_id, v.playlist_index, v.playlist FROM ideas i JOIN videos v ON v.id = i.video_id WHERE (i.summary LIKE ? OR i.context LIKE ? OR i.detail LIKE ?)';
+          var params3 = [p, p, p];
+          scope.clauses.forEach(function(c) { sql3 += ' AND ' + c; });
+          params3 = params3.concat(scope.params);
+          sql3 += ' ORDER BY v.playlist_index, i.start_time LIMIT 200';
+          rows = queryRows(sql3, params3);
           hint = 'keyword "' + kw + '"';
         }
       }
     } catch(err) { showError(err.message); return; }
 
+    if (activeSeries === 'wim') hint += ' \u00b7 WiM';
+    else if (activeSeries === 'livestreams') hint += ' \u00b7 Livestreams';
+    if (activeVideoId) hint += ' \u00b7 ' + activeVideoTitle;
+
     if (rows.length === 0) {
       statusBar.style.display = 'none';
-      appContent.innerHTML = '<div class="empty-state"><div class="empty-state-title">No results found</div><div class="empty-state-sub">Try a different keyword or browse the index</div></div>';
+      appContent.innerHTML = '<div class="empty-state"><div class="empty-state-title">No results found</div><div class="empty-state-sub">Try a different keyword or adjust the scope</div></div>';
       return;
     }
 
