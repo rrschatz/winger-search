@@ -181,6 +181,11 @@
     .scope-clear { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #8a9aaa; cursor: pointer; background: none; border: none; text-decoration: underline; margin-left: 4px; }
     .scope-clear:hover { color: var(--navy); }
     .scope-video-name { font-family: 'IBM Plex Sans', sans-serif; font-size: 12px; color: var(--navy); font-weight: 500; margin-left: 4px; }
+    .scope-series-row { display: none; flex-wrap: wrap; gap: 6px; margin-top: 6px; width: 100%; }
+    .scope-series-row.active { display: flex; }
+    .scope-series-pill { font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.05em; padding: 3px 10px; border-radius: 14px; border: 1px solid var(--cream-dim); cursor: pointer; background: transparent; color: #6b7f96; transition: all 0.15s; }
+    .scope-series-pill:hover { border-color: #8a9aaa; color: var(--navy); }
+    .scope-series-pill.active { background: var(--navy-mid); color: var(--cream); border-color: var(--navy-mid); }
 
     /* VIDEO TAGS HEADER */
     .video-tags-header { margin-bottom: 16px; padding: 14px 16px; background: var(--white); border: 1px solid var(--cream-dim); border-radius: 6px; }
@@ -255,6 +260,7 @@
     <button class="scope-pill liv" data-scope="livestreams">Livestreams</button>
     <span id="scopeVideoName" class="scope-video-name" style="display:none"></span>
     <button id="scopeClear" class="scope-clear" style="display:none">clear video</button>
+    <div id="scopeSeriesRow" class="scope-series-row"></div>
   </div>
 
   <div id="statusBar" class="status-bar" style="display:none">
@@ -293,8 +299,10 @@
   var allBrowseTags = [];
   var allVideos = [];
   var activeSeries = '';
+  var activeScopeSeries = '';
   var activeVideoId = null;
   var activeVideoTitle = '';
+  var allSeriesList = [];
 
   var kwInput           = document.getElementById('kwInput');
   var tagInput          = document.getElementById('tagInput');
@@ -311,6 +319,7 @@
   var browseFilterInput = document.getElementById('browseFilterInput');
   var scopeVideoName  = document.getElementById('scopeVideoName');
   var scopeClear      = document.getElementById('scopeClear');
+  var scopeSeriesRow  = document.getElementById('scopeSeriesRow');
   var resetBtn        = document.getElementById('resetBtn');
 
   try {
@@ -334,7 +343,12 @@
     );
 
     allVideos = queryRows(
-      'SELECT v.id, v.title, v.youtube_id, v.playlist, v.playlist_index, COUNT(i.id) as idea_count FROM videos v LEFT JOIN ideas i ON i.video_id = v.id GROUP BY v.id ORDER BY v.playlist, v.playlist_index',
+      'SELECT v.id, v.title, v.youtube_id, v.playlist, v.playlist_index, v.series, COUNT(i.id) as idea_count FROM videos v LEFT JOIN ideas i ON i.video_id = v.id GROUP BY v.id ORDER BY v.playlist, v.playlist_index',
+      []
+    );
+
+    allSeriesList = queryRows(
+      'SELECT series, COUNT(*) as cnt FROM videos WHERE series IS NOT NULL GROUP BY series ORDER BY cnt DESC',
       []
     );
 
@@ -347,7 +361,7 @@
   /* ---- SCOPE ---- */
 
   function updateScopeUI() {
-    document.querySelectorAll('.scope-pill').forEach(function(p) {
+    document.querySelectorAll('.scope-pill[data-scope]').forEach(function(p) {
       p.classList.toggle('active', p.dataset.scope === activeSeries);
     });
     if (activeVideoId) {
@@ -358,11 +372,52 @@
       scopeVideoName.style.display = 'none';
       scopeClear.style.display = 'none';
     }
+    buildSeriesPills();
   }
 
-  document.querySelectorAll('.scope-pill').forEach(function(pill) {
+  function buildSeriesPills() {
+    scopeSeriesRow.innerHTML = '';
+    if (!activeSeries && !activeVideoId) {
+      scopeSeriesRow.classList.remove('active');
+      return;
+    }
+    var seriesForScope = allSeriesList.filter(function(s) {
+      if (activeSeries === 'wim') return s.series === 'Women in Ministry';
+      if (activeSeries === 'livestreams') return s.series !== 'Women in Ministry';
+      return true;
+    });
+    if (seriesForScope.length <= 1) { scopeSeriesRow.classList.remove('active'); return; }
+    scopeSeriesRow.classList.add('active');
+    var allBtn = document.createElement('button');
+    allBtn.className = 'scope-series-pill' + (!activeScopeSeries ? ' active' : '');
+    allBtn.textContent = 'All';
+    allBtn.addEventListener('click', function() {
+      activeScopeSeries = '';
+      updateScopeUI();
+      if (browseMode) { refreshBrowseTags(); buildBrowseCats(); renderBrowseGrid(); }
+      else if (videoBrowseMode) { renderVideoList(); }
+      else if (lastKeyword || lastTag) { runSearch(); }
+    });
+    scopeSeriesRow.appendChild(allBtn);
+    seriesForScope.forEach(function(s) {
+      var btn = document.createElement('button');
+      btn.className = 'scope-series-pill' + (activeScopeSeries === s.series ? ' active' : '');
+      btn.textContent = s.series + ' (' + s.cnt + ')';
+      btn.addEventListener('click', function() {
+        activeScopeSeries = s.series;
+        updateScopeUI();
+        if (browseMode) { refreshBrowseTags(); buildBrowseCats(); renderBrowseGrid(); }
+        else if (videoBrowseMode) { renderVideoList(); }
+        else if (lastKeyword || lastTag) { runSearch(); }
+      });
+      scopeSeriesRow.appendChild(btn);
+    });
+  }
+
+  document.querySelectorAll('.scope-pill[data-scope]').forEach(function(pill) {
     pill.addEventListener('click', function() {
       activeSeries = pill.dataset.scope;
+      activeScopeSeries = '';
       activeVideoId = null;
       activeVideoTitle = '';
       updateScopeUI();
@@ -375,6 +430,7 @@
   scopeClear.addEventListener('click', function() {
     activeVideoId = null;
     activeVideoTitle = '';
+    activeScopeSeries = '';
     updateScopeUI();
     if (browseMode) { refreshBrowseTags(); buildBrowseCats(); renderBrowseGrid(); }
     else if (lastKeyword || lastTag) { runSearch(); }
@@ -388,6 +444,7 @@
     lastTag = '';
     activeCategory = '';
     activeSeries = '';
+    activeScopeSeries = '';
     activeVideoId = null;
     activeVideoTitle = '';
     browseCat = 'all';
@@ -410,16 +467,13 @@
         'SELECT t.name, t.category, COUNT(DISTINCT it.idea_id) as cnt FROM tags t JOIN idea_tags it ON it.tag_id = t.id JOIN ideas i ON i.id = it.idea_id WHERE i.video_id = ? GROUP BY t.id ORDER BY cnt DESC, t.name ASC',
         [activeVideoId]
       );
-    } else if (activeSeries) {
-      allBrowseTags = queryRows(
-        'SELECT t.name, t.category, COUNT(DISTINCT it.idea_id) as cnt FROM tags t JOIN idea_tags it ON it.tag_id = t.id JOIN ideas i ON i.id = it.idea_id JOIN videos v ON v.id = i.video_id WHERE v.playlist = ? GROUP BY t.id ORDER BY cnt DESC, t.name ASC',
-        [activeSeries]
-      );
     } else {
-      allBrowseTags = queryRows(
-        'SELECT t.name, t.category, COUNT(it.idea_id) as cnt FROM tags t JOIN idea_tags it ON it.tag_id = t.id GROUP BY t.id ORDER BY cnt DESC, t.name ASC',
-        []
-      );
+      var sql = 'SELECT t.name, t.category, COUNT(DISTINCT it.idea_id) as cnt FROM tags t JOIN idea_tags it ON it.tag_id = t.id JOIN ideas i ON i.id = it.idea_id JOIN videos v ON v.id = i.video_id WHERE 1=1';
+      var params = [];
+      if (activeSeries) { sql += ' AND v.playlist = ?'; params.push(activeSeries); }
+      if (activeScopeSeries) { sql += ' AND v.series = ?'; params.push(activeScopeSeries); }
+      sql += ' GROUP BY t.id ORDER BY cnt DESC, t.name ASC';
+      allBrowseTags = queryRows(sql, params);
     }
   }
 
@@ -540,6 +594,7 @@
     var filterText = browseFilterInput.value.trim().toLowerCase();
     var vids = allVideos.filter(function(v) {
       if (activeSeries && v.playlist !== activeSeries) return false;
+      if (activeScopeSeries && v.series !== activeScopeSeries) return false;
       if (!filterText) return true;
       return v.title.toLowerCase().indexOf(filterText) !== -1 || seriesLabel(v.playlist, v.playlist_index).toLowerCase().indexOf(filterText) !== -1;
     });
@@ -756,7 +811,10 @@
     var clauses = [];
     var params = [];
     if (activeVideoId) { clauses.push('v.id = ?'); params.push(activeVideoId); }
-    else if (activeSeries) { clauses.push('v.playlist = ?'); params.push(activeSeries); }
+    else {
+      if (activeSeries) { clauses.push('v.playlist = ?'); params.push(activeSeries); }
+      if (activeScopeSeries) { clauses.push('v.series = ?'); params.push(activeScopeSeries); }
+    }
     return { clauses: clauses, params: params };
   }
 
