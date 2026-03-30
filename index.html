@@ -100,6 +100,8 @@
     .browse-video-badge.livestreams { background: rgba(37,99,235,0.08); color: #2563eb; border: 1px solid rgba(37,99,235,0.25); }
     .browse-video-title { font-family: 'IBM Plex Sans', sans-serif; font-size: 13px; font-weight: 500; color: var(--navy); flex: 1; min-width: 0; }
     .browse-video-count { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #8a9aaa; flex-shrink: 0; }
+    .browse-video-date { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #a0aab4; flex-shrink: 0; min-width: 72px; }
+    .card-date { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #a0aab4; flex-shrink: 0; }
     .browse-header { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--cream-dim); flex-wrap: wrap; }
     .browse-title { font-family: 'Playfair Display', serif; font-size: 22px; font-weight: 600; flex: 1; }
     .browse-filter-input { background: var(--white); border: 1px solid var(--cream-dim); border-radius: var(--radius); font-family: 'IBM Plex Sans', sans-serif; font-size: 13px; padding: 8px 12px; outline: none; width: 240px; color: var(--navy); transition: border-color 0.15s; }
@@ -187,6 +189,13 @@
     .scope-series-pill:hover { border-color: #8a9aaa; color: var(--navy); }
     .scope-series-pill.active { background: var(--navy-mid); color: var(--cream); border-color: var(--navy-mid); }
 
+    .scope-date-row { display: none; flex-wrap: wrap; gap: 6px; margin-top: 6px; width: 100%; }
+    .scope-date-row.active { display: flex; }
+    .scope-date-pill { font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.05em; padding: 3px 10px; border-radius: 14px; border: 1px solid var(--cream-dim); cursor: pointer; background: transparent; color: #6b7f96; transition: all 0.15s; }
+    .scope-date-pill:hover { border-color: #8a9aaa; color: var(--navy); }
+    .scope-date-pill.active { background: #6366f1; color: white; border-color: #6366f1; }
+    .scope-date-label { font-family: 'IBM Plex Mono', monospace; font-size: 8px; letter-spacing: 0.1em; text-transform: uppercase; color: #a0aab4; flex-shrink: 0; padding: 3px 4px 3px 0; }
+
     /* VIDEO TAGS HEADER */
     .video-tags-header { margin-bottom: 16px; padding: 14px 16px; background: var(--white); border: 1px solid var(--cream-dim); border-radius: 6px; }
     .video-tags-header .browse-grid { margin-top: 10px; }
@@ -261,6 +270,7 @@
     <span id="scopeVideoName" class="scope-video-name" style="display:none"></span>
     <button id="scopeClear" class="scope-clear" style="display:none">clear video</button>
     <div id="scopeSeriesRow" class="scope-series-row"></div>
+    <div id="scopeDateRow" class="scope-date-row"></div>
   </div>
 
   <div id="statusBar" class="status-bar" style="display:none">
@@ -303,6 +313,10 @@
   var activeVideoId = null;
   var activeVideoTitle = '';
   var allSeriesList = [];
+  var activeYear = '';
+  var activeMonth = '';
+  var allYears = [];
+  var yearMonths = {};
 
   var kwInput           = document.getElementById('kwInput');
   var tagInput          = document.getElementById('tagInput');
@@ -321,6 +335,7 @@
   var scopeClear      = document.getElementById('scopeClear');
   var scopeSeriesRow  = document.getElementById('scopeSeriesRow');
   var resetBtn        = document.getElementById('resetBtn');
+  var scopeDateRow    = document.getElementById('scopeDateRow');
 
   try {
     var SQL = await initSqlJs({
@@ -343,9 +358,24 @@
     );
 
     allVideos = queryRows(
-      'SELECT v.id, v.title, v.youtube_id, v.playlist, v.playlist_index, v.series, COUNT(i.id) as idea_count FROM videos v LEFT JOIN ideas i ON i.video_id = v.id GROUP BY v.id ORDER BY v.playlist, v.playlist_index',
+      'SELECT v.id, v.title, v.youtube_id, v.playlist, v.playlist_index, v.series, v.published_date, COUNT(i.id) as idea_count FROM videos v LEFT JOIN ideas i ON i.video_id = v.id GROUP BY v.id ORDER BY v.playlist, v.playlist_index',
       []
     );
+
+    // Build year/month index from video dates
+    var ymSet = {};
+    allVideos.forEach(function(v) {
+      if (!v.published_date) return;
+      var y = v.published_date.substring(0, 4);
+      var m = v.published_date.substring(0, 7);
+      if (!ymSet[y]) ymSet[y] = {};
+      ymSet[y][m] = (ymSet[y][m] || 0) + 1;
+    });
+    allYears = Object.keys(ymSet).sort();
+    yearMonths = {};
+    allYears.forEach(function(y) {
+      yearMonths[y] = Object.keys(ymSet[y]).sort().map(function(m) { return { month: m, cnt: ymSet[y][m] }; });
+    });
 
     allSeriesList = queryRows(
       'SELECT series, COUNT(*) as cnt FROM videos WHERE series IS NOT NULL GROUP BY series ORDER BY cnt DESC',
@@ -360,6 +390,19 @@
 
   /* ---- SCOPE ---- */
 
+  var MONTH_NAMES = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  function formatDate(d) {
+    if (!d) return '';
+    var parts = d.split('-');
+    return MONTH_NAMES[parseInt(parts[1])] + ' ' + parseInt(parts[2]) + ', ' + parts[0];
+  }
+
+  function formatMonthLabel(m) {
+    var parts = m.split('-');
+    return MONTH_NAMES[parseInt(parts[1])] + ' ' + parts[0];
+  }
+
   function updateScopeUI() {
     document.querySelectorAll('.scope-pill[data-scope]').forEach(function(p) {
       p.classList.toggle('active', p.dataset.scope === activeSeries);
@@ -373,6 +416,70 @@
       scopeClear.style.display = 'none';
     }
     buildSeriesPills();
+    buildDatePills();
+  }
+
+  function buildDatePills() {
+    scopeDateRow.innerHTML = '';
+    if (activeVideoId) { scopeDateRow.classList.remove('active'); return; }
+    scopeDateRow.classList.add('active');
+
+    var label = document.createElement('span');
+    label.className = 'scope-date-label';
+    label.textContent = 'Date:';
+    scopeDateRow.appendChild(label);
+
+    // "All" pill
+    var allBtn = document.createElement('button');
+    allBtn.className = 'scope-date-pill' + (!activeYear ? ' active' : '');
+    allBtn.textContent = 'All';
+    allBtn.addEventListener('click', function() {
+      activeYear = ''; activeMonth = '';
+      updateScopeUI();
+      refreshAfterScopeChange();
+    });
+    scopeDateRow.appendChild(allBtn);
+
+    // Year pills
+    allYears.forEach(function(y) {
+      var btn = document.createElement('button');
+      btn.className = 'scope-date-pill' + (activeYear === y && !activeMonth ? ' active' : '');
+      btn.textContent = y;
+      btn.addEventListener('click', function() {
+        if (activeYear === y && !activeMonth) { activeYear = ''; }
+        else { activeYear = y; activeMonth = ''; }
+        updateScopeUI();
+        refreshAfterScopeChange();
+      });
+      scopeDateRow.appendChild(btn);
+    });
+
+    // Month pills (only when a year is selected)
+    if (activeYear && yearMonths[activeYear]) {
+      var sep = document.createElement('span');
+      sep.className = 'scope-date-label';
+      sep.textContent = '\u00b7';
+      sep.style.padding = '3px 4px';
+      scopeDateRow.appendChild(sep);
+
+      yearMonths[activeYear].forEach(function(m) {
+        var btn = document.createElement('button');
+        btn.className = 'scope-date-pill' + (activeMonth === m.month ? ' active' : '');
+        btn.textContent = MONTH_NAMES[parseInt(m.month.split('-')[1])];
+        btn.addEventListener('click', function() {
+          activeMonth = activeMonth === m.month ? '' : m.month;
+          updateScopeUI();
+          refreshAfterScopeChange();
+        });
+        scopeDateRow.appendChild(btn);
+      });
+    }
+  }
+
+  function refreshAfterScopeChange() {
+    if (browseMode) { refreshBrowseTags(); buildBrowseCats(); renderBrowseGrid(); }
+    else if (videoBrowseMode) { renderVideoList(); }
+    else if (lastKeyword || lastTag) { runSearch(); }
   }
 
   function buildSeriesPills() {
@@ -394,9 +501,7 @@
     allBtn.addEventListener('click', function() {
       activeScopeSeries = '';
       updateScopeUI();
-      if (browseMode) { refreshBrowseTags(); buildBrowseCats(); renderBrowseGrid(); }
-      else if (videoBrowseMode) { renderVideoList(); }
-      else if (lastKeyword || lastTag) { runSearch(); }
+      refreshAfterScopeChange();
     });
     scopeSeriesRow.appendChild(allBtn);
     seriesForScope.forEach(function(s) {
@@ -406,9 +511,7 @@
       btn.addEventListener('click', function() {
         activeScopeSeries = s.series;
         updateScopeUI();
-        if (browseMode) { refreshBrowseTags(); buildBrowseCats(); renderBrowseGrid(); }
-        else if (videoBrowseMode) { renderVideoList(); }
-        else if (lastKeyword || lastTag) { runSearch(); }
+        refreshAfterScopeChange();
       });
       scopeSeriesRow.appendChild(btn);
     });
@@ -421,9 +524,7 @@
       activeVideoId = null;
       activeVideoTitle = '';
       updateScopeUI();
-      if (browseMode) { refreshBrowseTags(); buildBrowseCats(); renderBrowseGrid(); }
-      else if (videoBrowseMode) { renderVideoList(); }
-      else if (lastKeyword || lastTag) { runSearch(); }
+      refreshAfterScopeChange();
     });
   });
 
@@ -432,9 +533,8 @@
     activeVideoTitle = '';
     activeScopeSeries = '';
     updateScopeUI();
-    if (browseMode) { refreshBrowseTags(); buildBrowseCats(); renderBrowseGrid(); }
-    else if (lastKeyword || lastTag) { runSearch(); }
-    else { showWelcome(); }
+    refreshAfterScopeChange();
+    if (!browseMode && !videoBrowseMode && !lastKeyword && !lastTag) showWelcome();
   });
 
   resetBtn.addEventListener('click', function() {
@@ -447,6 +547,8 @@
     activeScopeSeries = '';
     activeVideoId = null;
     activeVideoTitle = '';
+    activeYear = '';
+    activeMonth = '';
     browseCat = 'all';
     document.querySelectorAll('.filter-btn').forEach(function(b) { b.classList.toggle('active', b.dataset.cat === ''); });
     updateScopeUI();
@@ -472,6 +574,8 @@
       var params = [];
       if (activeSeries) { sql += ' AND v.playlist = ?'; params.push(activeSeries); }
       if (activeScopeSeries) { sql += ' AND v.series = ?'; params.push(activeScopeSeries); }
+      if (activeMonth) { sql += " AND v.published_date LIKE ?"; params.push(activeMonth + '%'); }
+      else if (activeYear) { sql += " AND v.published_date LIKE ?"; params.push(activeYear + '%'); }
       sql += ' GROUP BY t.id ORDER BY cnt DESC, t.name ASC';
       allBrowseTags = queryRows(sql, params);
     }
@@ -595,6 +699,8 @@
     var vids = allVideos.filter(function(v) {
       if (activeSeries && v.playlist !== activeSeries) return false;
       if (activeScopeSeries && v.series !== activeScopeSeries) return false;
+      if (activeMonth && (!v.published_date || !v.published_date.startsWith(activeMonth))) return false;
+      else if (activeYear && (!v.published_date || !v.published_date.startsWith(activeYear))) return false;
       if (!filterText) return true;
       return v.title.toLowerCase().indexOf(filterText) !== -1 || seriesLabel(v.playlist, v.playlist_index).toLowerCase().indexOf(filterText) !== -1;
     });
@@ -608,6 +714,9 @@
       var badge = document.createElement('span');
       badge.className = 'browse-video-badge ' + v.playlist;
       badge.textContent = seriesLabel(v.playlist, v.playlist_index);
+      var dateEl = document.createElement('span');
+      dateEl.className = 'browse-video-date';
+      dateEl.textContent = formatDate(v.published_date);
       var title = document.createElement('span');
       title.className = 'browse-video-title';
       title.textContent = v.title;
@@ -615,6 +724,7 @@
       count.className = 'browse-video-count';
       count.textContent = v.idea_count + ' ideas';
       item.appendChild(badge);
+      item.appendChild(dateEl);
       item.appendChild(title);
       item.appendChild(count);
       item.addEventListener('click', function() { showVideoIdeas(v.id); });
@@ -631,10 +741,10 @@
 
     var sql, params;
     if (filterTagName) {
-      sql = 'SELECT DISTINCT i.id, i.start_time, i.end_time, i.summary, i.context, i.detail, v.title, v.youtube_id, v.playlist_index, v.playlist FROM ideas i JOIN videos v ON v.id = i.video_id JOIN idea_tags it ON it.idea_id = i.id JOIN tags t ON t.id = it.tag_id WHERE v.id = ? AND t.name = ? ORDER BY i.start_time';
+      sql = 'SELECT DISTINCT i.id, i.start_time, i.end_time, i.summary, i.context, i.detail, v.title, v.youtube_id, v.playlist_index, v.playlist, v.published_date FROM ideas i JOIN videos v ON v.id = i.video_id JOIN idea_tags it ON it.idea_id = i.id JOIN tags t ON t.id = it.tag_id WHERE v.id = ? AND t.name = ? ORDER BY i.start_time';
       params = [videoId, filterTagName];
     } else {
-      sql = 'SELECT i.id, i.start_time, i.end_time, i.summary, i.context, i.detail, v.title, v.youtube_id, v.playlist_index, v.playlist FROM ideas i JOIN videos v ON v.id = i.video_id WHERE v.id = ? ORDER BY i.start_time';
+      sql = 'SELECT i.id, i.start_time, i.end_time, i.summary, i.context, i.detail, v.title, v.youtube_id, v.playlist_index, v.playlist, v.published_date FROM ideas i JOIN videos v ON v.id = i.video_id WHERE v.id = ? ORDER BY i.start_time';
       params = [videoId];
     }
     var rows = queryRows(sql, params);
@@ -656,7 +766,9 @@
 
     statusBar.style.display = 'flex';
     resultCount.innerHTML = '<span>' + rows.length + '</span> idea' + (rows.length === 1 ? '' : 's');
-    var hintText = seriesLabel(rows[0].playlist, rows[0].playlist_index) + ' \u00b7 ' + rows[0].title;
+    var hintText = seriesLabel(rows[0].playlist, rows[0].playlist_index);
+    if (rows[0].published_date) hintText += ' \u00b7 ' + formatDate(rows[0].published_date);
+    hintText += ' \u00b7 ' + rows[0].title;
     if (filterTagName) hintText += ' \u00b7 tag: ' + filterTagName;
     statusHint.textContent = hintText;
 
@@ -815,6 +927,8 @@
       if (activeSeries) { clauses.push('v.playlist = ?'); params.push(activeSeries); }
       if (activeScopeSeries) { clauses.push('v.series = ?'); params.push(activeScopeSeries); }
     }
+    if (activeMonth) { clauses.push("v.published_date LIKE ?"); params.push(activeMonth + '%'); }
+    else if (activeYear) { clauses.push("v.published_date LIKE ?"); params.push(activeYear + '%'); }
     return { clauses: clauses, params: params };
   }
 
@@ -832,7 +946,7 @@
 
     try {
       if (tag) {
-        var sql = 'SELECT DISTINCT i.id, i.start_time, i.end_time, i.summary, i.context, i.detail, v.title, v.youtube_id, v.playlist_index, v.playlist FROM ideas i JOIN idea_tags it ON it.idea_id = i.id JOIN tags t ON t.id = it.tag_id JOIN videos v ON v.id = i.video_id WHERE t.name LIKE ?';
+        var sql = 'SELECT DISTINCT i.id, i.start_time, i.end_time, i.summary, i.context, i.detail, v.title, v.youtube_id, v.playlist_index, v.playlist, v.published_date FROM ideas i JOIN idea_tags it ON it.idea_id = i.id JOIN tags t ON t.id = it.tag_id JOIN videos v ON v.id = i.video_id WHERE t.name LIKE ?';
         var params = ['%' + tag + '%'];
         if (activeCategory) { sql += ' AND t.category = ?'; params.push(activeCategory); }
         scope.clauses.forEach(function(c) { sql += ' AND ' + c; });
@@ -847,7 +961,7 @@
           var newIds = rangeIds.filter(function(id) { return !existing[id]; });
           if (newIds.length) {
             var ph = newIds.map(function() { return '?'; }).join(',');
-            var extraSql = 'SELECT DISTINCT i.id, i.start_time, i.end_time, i.summary, i.context, i.detail, v.title, v.youtube_id, v.playlist_index, v.playlist FROM ideas i JOIN videos v ON v.id = i.video_id WHERE i.id IN (' + ph + ')';
+            var extraSql = 'SELECT DISTINCT i.id, i.start_time, i.end_time, i.summary, i.context, i.detail, v.title, v.youtube_id, v.playlist_index, v.playlist, v.published_date FROM ideas i JOIN videos v ON v.id = i.video_id WHERE i.id IN (' + ph + ')';
             var extraParams = newIds.slice();
             scope.clauses.forEach(function(c) { extraSql += ' AND ' + c; });
             extraParams = extraParams.concat(scope.params);
@@ -864,7 +978,7 @@
       } else {
         var p = '%' + kw + '%';
         if (activeCategory) {
-          var sql2 = 'SELECT DISTINCT i.id, i.start_time, i.end_time, i.summary, i.context, i.detail, v.title, v.youtube_id, v.playlist_index, v.playlist FROM ideas i JOIN videos v ON v.id = i.video_id JOIN idea_tags it ON it.idea_id = i.id JOIN tags t ON t.id = it.tag_id WHERE (i.summary LIKE ? OR i.context LIKE ? OR i.detail LIKE ?) AND t.category = ?';
+          var sql2 = 'SELECT DISTINCT i.id, i.start_time, i.end_time, i.summary, i.context, i.detail, v.title, v.youtube_id, v.playlist_index, v.playlist, v.published_date FROM ideas i JOIN videos v ON v.id = i.video_id JOIN idea_tags it ON it.idea_id = i.id JOIN tags t ON t.id = it.tag_id WHERE (i.summary LIKE ? OR i.context LIKE ? OR i.detail LIKE ?) AND t.category = ?';
           var params2 = [p, p, p, activeCategory];
           scope.clauses.forEach(function(c) { sql2 += ' AND ' + c; });
           params2 = params2.concat(scope.params);
@@ -872,7 +986,7 @@
           rows = queryRows(sql2, params2);
           hint = activeCategory + ' \u00b7 keyword "' + kw + '"';
         } else {
-          var sql3 = 'SELECT DISTINCT i.id, i.start_time, i.end_time, i.summary, i.context, i.detail, v.title, v.youtube_id, v.playlist_index, v.playlist FROM ideas i JOIN videos v ON v.id = i.video_id WHERE (i.summary LIKE ? OR i.context LIKE ? OR i.detail LIKE ?)';
+          var sql3 = 'SELECT DISTINCT i.id, i.start_time, i.end_time, i.summary, i.context, i.detail, v.title, v.youtube_id, v.playlist_index, v.playlist, v.published_date FROM ideas i JOIN videos v ON v.id = i.video_id WHERE (i.summary LIKE ? OR i.context LIKE ? OR i.detail LIKE ?)';
           var params3 = [p, p, p];
           scope.clauses.forEach(function(c) { sql3 += ' AND ' + c; });
           params3 = params3.concat(scope.params);
@@ -886,6 +1000,8 @@
     if (activeSeries === 'wim') hint += ' \u00b7 WiM';
     else if (activeSeries === 'livestreams') hint += ' \u00b7 Livestreams';
     if (activeVideoId) hint += ' \u00b7 ' + activeVideoTitle;
+    if (activeMonth) hint += ' \u00b7 ' + formatMonthLabel(activeMonth);
+    else if (activeYear) hint += ' \u00b7 ' + activeYear;
 
     if (rows.length === 0) {
       statusBar.style.display = 'none';
@@ -958,6 +1074,7 @@
         '<div class="card-body">' +
           '<div class="card-meta">' +
             '<span class="card-video-num">' + seriesLabel(row.playlist || 'livestreams', row.playlist_index) + '</span>' +
+            (row.published_date ? '<span class="card-date">' + formatDate(row.published_date) + '</span>' : '') +
             '<span class="card-video-title">' + escHtml(row.title) + '</span>' +
             '<a class="card-timestamp" href="' + ytLink + '" target="_blank" rel="noopener">' + escHtml(tsDisplay) + '</a>' +
           '</div>' +
